@@ -1,0 +1,112 @@
+# Importing required libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import yfinance as yf
+from scipy.stats import norm
+
+# Configuration options
+plt.style.use('seaborn-darkgrid')
+
+# Fetch asset price data
+def fetch_data(tickers, start, end):
+    try:
+        data = yf.download(tickers, start=start, end=end)['Adj Close']
+        return data
+    except Exception as e:
+        print(f"Error fetching data: {e}")
+        return None
+
+# Preprocess the data
+def preprocess_data(data):
+    log_returns = np.log(data / data.shift(1))
+    log_returns = log_returns.dropna()
+    return log_returns
+
+# Historical VaR and CVaR
+def historical_var_cvar(portfolio_returns, confidence_level):
+    var = -np.percentile(portfolio_returns, 100 - confidence_level)
+    cvar = -portfolio_returns[portfolio_returns <= -var].mean()
+    return var, cvar
+
+# Parametric VaR and CVaR (assuming normal distribution)
+def parametric_var_cvar(portfolio_returns, confidence_level):
+    mean = np.mean(portfolio_returns)
+    std_dev = np.std(portfolio_returns)
+    var = norm.ppf(1 - confidence_level / 100) * std_dev - mean
+    alpha = confidence_level / 100
+    cvar = -mean + std_dev * norm.pdf(norm.ppf(alpha)) / alpha
+    return -var, -cvar
+
+# Monte Carlo VaR and CVaR
+def monte_carlo_var_cvar(portfolio_returns, confidence_level, simulations=10000):
+    mean = np.mean(portfolio_returns)
+    std_dev = np.std(portfolio_returns)
+    simulated_returns = np.random.normal(mean, std_dev, simulations)
+    var = np.percentile(simulated_returns, 100 - confidence_level)
+    cvar = -simulated_returns[simulated_returns <= var].mean()
+    return -var, -cvar
+
+# Plotting function
+def plot_results(log_returns, var_95, var_99, cvar_95, cvar_99, method):
+    plt.figure(figsize=(12, 6))
+    plt.hist(log_returns, bins=50, alpha=0.5, label='Log Returns')
+    plt.axvline(x=-var_95, color='r', linestyle='--', label=f'VaR 95%: {var_95:.4f}')
+    plt.axvline(x=-var_99, color='g', linestyle='--', label=f'VaR 99%: {var_99:.4f}')
+    plt.axvline(x=-cvar_95, color='r', linestyle='-', label=f'CVaR 95%: {cvar_95:.4f}')
+    plt.axvline(x=-cvar_99, color='g', linestyle='-', label=f'CVaR 99%: {cvar_99:.4f}')
+    plt.title(f'Value at Risk (VaR) and Conditional Value at Risk (CVaR) - {method}')
+    plt.xlabel('Logarithmic Returns')
+    plt.ylabel('Frequency')
+    plt.legend()
+    plt.show()
+
+# Main function
+def main():
+    # Define start and end dates
+    start_date = '2024-06-01'
+    end_date = '2024-06-23'
+    
+    # Define tickers and weights
+    tickers = ['BTC-USD', 'ETH-USD']
+    weights = np.array([1, 0])  # Example weights for BTC and ETH
+
+    # Fetch data
+    data = fetch_data(tickers, start=start_date, end=end_date)
+    if data is None:
+        return
+    
+    # Preprocess data
+    log_returns = preprocess_data(data)
+    
+    # Calculate portfolio returns
+    portfolio_log_returns = log_returns.dot(weights)
+    
+    # Calculate VaR and CVaR
+    confidence_levels = [95, 99]
+    methods = {
+        'Historical': historical_var_cvar,
+        'Parametric': parametric_var_cvar,
+        'Monte Carlo': monte_carlo_var_cvar
+    }
+
+    var_cvar_results = {}
+    for method, var_function in methods.items():
+        var_cvar_results[method] = {}
+        for cl in confidence_levels:
+            var, cvar = var_function(portfolio_log_returns, cl)
+            var_cvar_results[method][cl] = (var, cvar)
+
+    # Print results
+    for method, results in var_cvar_results.items():
+        print(f"\n{method} VaR and CVaR:")
+        for cl, (var, cvar) in results.items():
+            print(f"{cl}% Confidence Level: VaR: {var:.4f}, CVaR: {cvar:.4f}")
+
+    # Visualize results
+    for method, results in var_cvar_results.items():
+        plot_results(portfolio_log_returns, results[95][0], results[99][0], results[95][1], results[99][1], method)
+
+# Run the main function
+if __name__ == "__main__":
+    main()
